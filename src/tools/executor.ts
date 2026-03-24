@@ -16,7 +16,7 @@
 import chalk from "chalk";
 import { getWallet, getTransfers, sendCoins } from "../bitgo.js";
 import { config } from "../config.js";
-import { checkAddressOnChain } from "../riskApi.js";
+import { checkAddressOnChain, checkAddressOnChainAbuse } from "../riskApi.js";
 
 // ─── Address Policy Lists ─────────────────────────────────────────────────────
 
@@ -110,6 +110,14 @@ export interface AddressRiskResult {
   whitelisted: boolean;
   flags: string[];
   summary: string;
+  /** ChainAbuse enrichment — present when scam reports exist */
+  chainAbuse?: {
+    reportCount: number;
+    totalLostUsd: number;
+    categories: string[];
+    reports: Array<{ scamCategory: string; description: string; amountLost: number | null; createdAt: string }>;
+    url: string;
+  };
 }
 
 /**
@@ -189,15 +197,19 @@ export async function toolCheckAddressRisk(address: string): Promise<AddressRisk
     if (f.cybercrime)      apiFlags.push("goplus:cybercrime");
 
     if (apiFlags.length > 0) {
-      // Any GoPlus flag is a hard block
+      // GoPlus flagged — enrich with ChainAbuse scam reports
+      const abuse = await checkAddressOnChainAbuse(address);
+      const abuseNote = buildAbuseNote(abuse);
+
       return {
         address,
         risk: "critical",
         blocked: true,
         whitelisted: false,
         flags: apiFlags,
-        summary: `BLOCKED by GoPlus threat intelligence (${apiResult.source}): ${apiFlags.join(", ")}`,
-      };
+        summary: `BLOCKED by GoPlus (${apiResult.source}): ${apiFlags.join(", ")}.${abuseNote}`,
+        chainAbuse: abuse.available ? abuse : undefined,
+      } as AddressRiskResult;
     }
 
     // GoPlus has data and found no flags — address is clean
@@ -211,19 +223,42 @@ export async function toolCheckAddressRisk(address: string): Promise<AddressRisk
     };
   }
 
-  // GoPlus has no data or doesn't support this chain — unknown address
+  // GoPlus has no data — call ChainAbuse to check community scam reports
+  const abuse = await checkAddressOnChainAbuse(address);
+  const abuseNote = buildAbuseNote(abuse);
+
+  if (abuse.available && abuse.reportCount > 0) {
+    return {
+      address,
+      risk: "high",
+      blocked: false,
+      whitelisted: false,
+      flags: ["chainabuse:scam_reports"],
+      summary: `ChainAbuse: ${abuse.reportCount} scam report(s) found.${abuseNote} Confirm before sending.`,
+      chainAbuse: abuse,
+    } as AddressRiskResult;
+  }
+
   const noDataNote = !apiResult.supported
-    ? "GoPlus does not cover this chain format."
-    : `GoPlus returned no data (source: ${apiResult.source}).`;
+    ? "Chain format not covered by GoPlus."
+    : "No threat data found in GoPlus or ChainAbuse.";
 
   return {
     address,
     risk: "medium",
     blocked: false,
     whitelisted: false,
-    flags: ["unrecognized_address", "goplus:no_data"],
-    summary: `Address not found in threat intelligence. ${noDataNote} Confirm with user before sending.`,
+    flags: ["unrecognized_address"],
+    summary: `${noDataNote} Confirm with user before sending.`,
   };
+}
+
+/** Formats a ChainAbuse result into a short sentence for the summary field. */
+function buildAbuseNote(abuse: { available: boolean; reportCount: number; totalLostUsd: number; categories: string[] }): string {
+  if (!abuse.available || abuse.reportCount === 0) return "";
+  const lost = abuse.totalLostUsd > 0 ? ` $${abuse.totalLostUsd.toLocaleString()} reported lost.` : "";
+  const cats = abuse.categories.length > 0 ? ` Categories: ${abuse.categories.join(", ")}.` : "";
+  return ` ChainAbuse: ${abuse.reportCount} report(s).${lost}${cats}`;
 }
 
 // ─── Tool: execute_transaction ────────────────────────────────────────────────

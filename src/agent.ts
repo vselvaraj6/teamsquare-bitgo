@@ -189,6 +189,28 @@ export function formatToolResult(name: string, result: Record<string, unknown>):
 
       lines.push(color(`└──────────────────────────────────────────────────┘`));
 
+      // ChainAbuse enrichment block
+      const abuse = result.chainAbuse as {
+        reportCount: number; totalLostUsd: number; categories: string[];
+        reports: Array<{ scamCategory: string; description: string; amountLost: number | null; createdAt: string }>;
+        url: string;
+      } | undefined;
+
+      if (abuse && abuse.reportCount > 0) {
+        lines.push("");
+        lines.push(chalk.red.bold(`   ⚠️  ChainAbuse: ${abuse.reportCount} community scam report(s)`));
+        if (abuse.totalLostUsd > 0) {
+          lines.push(chalk.red(`   💸 Total reported lost: $${abuse.totalLostUsd.toLocaleString()} USD`));
+        }
+        if (abuse.categories.length > 0) {
+          lines.push(chalk.yellow(`   📂 Categories: ${abuse.categories.join(", ")}`));
+        }
+        abuse.reports.slice(0, 2).forEach((r, i) => {
+          lines.push(chalk.gray(`   Report ${i + 1} [${r.scamCategory}]: ${r.description.slice(0, 80)}...`));
+        });
+        lines.push(chalk.cyan(`   🔗 ${abuse.url}`));
+      }
+
       return lines.map(l => indent + l).join("\n");
     }
 
