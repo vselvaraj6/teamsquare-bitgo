@@ -73,15 +73,22 @@ export async function toolGetWalletBalance(): Promise<object> {
 export async function toolGetRecentTransactions(limit: number = 10): Promise<object> {
   try {
     const data = await getTransfers(limit);
-    const simplified = data.transfers.map((t) => ({
-      txid: t.txid,
-      to: t.to,
-      from: t.from,
-      amount: t.amount,
-      status: t.state,
-      date: t.confirmedTime,
-      comment: t.comment || t.label,
-    }));
+    const simplified = data.transfers.map((t: any) => {
+      // BitGo transfers have multiple entries. 
+      // For a "send", we want the entry that isn't our own wallet (or has the negative value).
+      // For this demo, we'll just pick the most relevant address.
+      const externalEntry = t.entries?.find((e: any) => e.wallet === undefined) || t.entries?.[0];
+      
+      return {
+        txid: t.txid,
+        address: externalEntry?.address || t.to || "unknown",
+        type: t.type, // 'send' or 'receive'
+        amount: Math.abs(t.value),
+        status: t.state,
+        date: t.confirmedTime,
+        comment: t.comment || t.label,
+      };
+    });
 
     return {
       success: true,
