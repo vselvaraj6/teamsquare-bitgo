@@ -150,27 +150,57 @@ export function formatToolCall(name: string, input: Record<string, unknown>): st
 
 /** Formats a tool result event for terminal display (called by index.ts). */
 export function formatToolResult(name: string, result: Record<string, unknown>): string {
+  const indent = "   ";
   switch (name) {
     case "get_wallet_balance": {
-      if (!result.success) return chalk.red(`   ✗ Failed to fetch balance`);
-      return chalk.green(`   ✓ Balance: ${result.balanceDisplay}`);
+      if (!result.success) return chalk.red(`${indent}✗ Failed to fetch balance`);
+      return chalk.cyan(`${indent}💰 Available: `) + chalk.green.bold(result.balanceDisplay);
     }
+
     case "check_address_risk": {
-      const risk = result.risk as string;
+      const risk = (result.risk as string).toUpperCase();
       const blocked = result.blocked as boolean;
+      const flags = (result.flags as string[]) || [];
+      const address = result.address as string;
+
       const color =
-        blocked || risk === "critical" ? chalk.red
-        : risk === "high" ? chalk.yellow
-        : risk === "medium" ? chalk.blue
+        blocked || risk === "CRITICAL" ? chalk.red
+        : risk === "HIGH" ? chalk.yellow
+        : risk === "MEDIUM" ? chalk.blue
         : chalk.green;
-      const icon = blocked ? "🚫" : risk === "low" ? "✅" : risk === "medium" ? "⚠️ " : "🔴";
-      return color(`   ${icon} Risk: ${risk.toUpperCase()} — ${result.summary}`);
+
+      const statusIcon = blocked ? "🚫 BLOCKED" : risk === "LOW" ? "✅ APPROVED" : "⚠️  CAUTION";
+
+      const lines = [
+        color(`┌──────────────────────────────────────────────────┐`),
+        color(`│             🛡️  ADDRESS SAFETY REPORT             │`),
+        color(`├──────────────────────────────────────────────────┤`),
+        color(`│  Address: `) + chalk.white(address.length > 38 ? address.slice(0, 35) + "..." : address.padEnd(38)) + color(` │`),
+        color(`│  Risk   : `) + chalk.bold(risk.padEnd(38)) + color(` │`),
+        color(`│  Status : `) + chalk.bold(statusIcon.padEnd(38)) + color(` │`),
+      ];
+
+      if (flags.length > 0) {
+        lines.push(color(`├──────────────────────────────────────────────────┤`));
+        lines.push(color(`│  Flags  : `) + chalk.gray(flags.join(", ").padEnd(38)) + color(` │`));
+      }
+
+      lines.push(color(`└──────────────────────────────────────────────────┘`));
+
+      return lines.map(l => indent + l).join("\n");
     }
+
     case "execute_transaction": {
-      if (!result.success) return chalk.red(`   ✗ ${result.reason ?? result.error}`);
-      return chalk.green(`   ✓ TX Hash: ${result.txid}`);
+      if (!result.success) {
+        return chalk.red(`${indent}❌ TRANSACTION FAILED`) + "\n" +
+               chalk.red(`${indent}   Reason: ${result.reason ?? result.error}`);
+      }
+      return chalk.green.bold(`${indent}🚀 TRANSACTION EXECUTED SUCCESSFULLY`) + "\n" +
+             chalk.cyan(`${indent}   TX Hash: `) + chalk.white(result.txid) + "\n" +
+             chalk.cyan(`${indent}   Amount : `) + chalk.white(`${result.amount_satoshis} satoshis`);
     }
+
     default:
-      return chalk.gray(`   → ${JSON.stringify(result)}`);
+      return chalk.gray(`${indent}→ ${JSON.stringify(result)}`);
   }
 }
