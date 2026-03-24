@@ -29,10 +29,10 @@ import { runAgent, formatToolCall, formatToolResult, type Message } from "./agen
 /** Prints the startup banner with wallet info. */
 function printBanner(coin: string, balance: number, label: string) {
   console.log("");
-  console.log(chalk.bold.white("╔══════════════════════════════════════════╗"));
-  console.log(chalk.bold.white("║") + chalk.bold.cyan("        🛡  TxGuard — Transaction Guard       ") + chalk.bold.white("║"));
-  console.log(chalk.bold.white("║") + chalk.gray("    AI-powered safety layer for crypto agents  ") + chalk.bold.white("║"));
-  console.log(chalk.bold.white("╚══════════════════════════════════════════╝"));
+  console.log(chalk.bold.white("╔═══════════════════════════════════════════════╗"));
+  console.log(chalk.bold.white("║") + chalk.bold.cyan("          TxGuard — Transaction Guard          ") + chalk.bold.white("║"));
+  console.log(chalk.bold.white("║") + chalk.gray("   AI-powered safety layer for crypto agents   ") + chalk.bold.white("║"));
+  console.log(chalk.bold.white("╚═══════════════════════════════════════════════╝"));
   console.log("");
   console.log(chalk.white("  Wallet : ") + chalk.cyan(label));
   console.log(chalk.white("  Coin   : ") + chalk.cyan(coin.toUpperCase()));
