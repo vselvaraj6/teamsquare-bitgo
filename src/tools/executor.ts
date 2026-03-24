@@ -18,20 +18,6 @@ import { getWallet, getTransfers, sendCoins } from "../bitgo.js";
 import { config } from "../config.js";
 import { checkAddressOnChain, checkAddressOnChainAbuse } from "../riskApi.js";
 
-// ─── Address Policy Lists ─────────────────────────────────────────────────────
-
-/** Hard-blocked addresses — sending to these is always rejected. */
-const BLOCKLIST: Record<string, string> = {
-  "0x0000000000000000000000000000000000000000": "null address — funds permanently unrecoverable",
-  "0xdead000000000000000042069420694206942069": "known burn address",
-  "0x000000000000000000000000000000000000dead": "dead address — funds permanently unrecoverable",
-  "1CounterpartyXXXXXXXXXXXXXXXUWLpVr": "Counterparty burn address",
-};
-
-/** Pre-approved addresses — skip the medium-risk confirmation prompt. */
-const WHITELIST = new Set([
-  "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", // demo safe BTC testnet address
-]);
 
 // ─── Tool: get_wallet_balance ─────────────────────────────────────────────────
 
@@ -107,7 +93,6 @@ export interface AddressRiskResult {
   address: string;
   risk: "low" | "medium" | "high" | "critical";
   blocked: boolean;
-  whitelisted: boolean;
   flags: string[];
   summary: string;
   /** ChainAbuse enrichment — present when scam reports exist */
@@ -124,48 +109,22 @@ export interface AddressRiskResult {
  * Evaluates the risk of sending to a given address.
  *
  * Checks in order:
- *   1. Local blocklist     → instant block, no API call needed
- *   2. Local whitelist     → instant approve
- *   3. Heuristic patterns  → flags obviously bad formats
- *   4. GoPlus Security API → real-time threat intelligence
- *      (phishing, sanctions, darkweb, money laundering, etc.)
+ *   1. Heuristic patterns  → catch obviously malformed addresses (no API needed)
+ *   2. GoPlus Security API → real-time automated threat intelligence
+ *   3. ChainAbuse API      → community scam reports (enrichment layer)
  *
- * GoPlus API failure (timeout/unavailable) does NOT block a transaction —
- * we degrade gracefully to heuristics rather than false-positives.
+ * No local blocklist or whitelist — all address data comes from live APIs
+ * so it stays current without any code changes.
+ *
+ * Both APIs fail open: unavailability never blocks a transaction.
  */
 export async function toolCheckAddressRisk(address: string): Promise<AddressRiskResult> {
   const flags: string[] = [];
-  const normalized = address.trim().toLowerCase();
 
-  // 1. Local blocklist (instant, no network)
-  const blockReason = BLOCKLIST[address] ?? BLOCKLIST[normalized];
-  if (blockReason) {
-    return {
-      address,
-      risk: "critical",
-      blocked: true,
-      whitelisted: false,
-      flags: ["blocklisted", "funds_unrecoverable"],
-      summary: `BLOCKED — ${blockReason}`,
-    };
-  }
-
-  // 2. Local whitelist (instant, no network)
-  if (WHITELIST.has(address) || WHITELIST.has(normalized)) {
-    return {
-      address,
-      risk: "low",
-      blocked: false,
-      whitelisted: true,
-      flags: ["whitelisted"],
-      summary: "Address is on the approved whitelist.",
-    };
-  }
-
-  // 3. Heuristic pattern checks (catch obvious bad formats before API call)
+  // 1. Heuristic pattern checks — format-based, zero maintenance
   if (/^0x0{10,}/i.test(address)) flags.push("looks_like_null_address");
-  if (/^0xdead/i.test(address)) flags.push("looks_like_burn_address");
-  if (address.length < 10) flags.push("suspiciously_short_address");
+  if (/^0xdead/i.test(address))   flags.push("looks_like_burn_address");
+  if (address.trim().length < 10) flags.push("suspiciously_short_address");
   if (/^(.)\1{9,}$/.test(address.replace(/^0x/, ""))) flags.push("all_same_characters");
 
   if (flags.length > 0) {
@@ -173,7 +132,6 @@ export async function toolCheckAddressRisk(address: string): Promise<AddressRisk
       address,
       risk: "high",
       blocked: false,
-      whitelisted: false,
       flags,
       summary: `Address has suspicious characteristics: ${flags.join(", ")}. Proceed with caution.`,
     };
@@ -205,7 +163,6 @@ export async function toolCheckAddressRisk(address: string): Promise<AddressRisk
         address,
         risk: "critical",
         blocked: true,
-        whitelisted: false,
         flags: apiFlags,
         summary: `BLOCKED by GoPlus (${apiResult.source}): ${apiFlags.join(", ")}.${abuseNote}`,
         chainAbuse: abuse.available ? abuse : undefined,
@@ -217,7 +174,6 @@ export async function toolCheckAddressRisk(address: string): Promise<AddressRisk
       address,
       risk: "low",
       blocked: false,
-      whitelisted: false,
       flags: [`goplus:clean (source: ${apiResult.source})`],
       summary: `Address verified clean by GoPlus Security (${apiResult.source}). Safe to proceed.`,
     };
@@ -232,7 +188,6 @@ export async function toolCheckAddressRisk(address: string): Promise<AddressRisk
       address,
       risk: "high",
       blocked: false,
-      whitelisted: false,
       flags: ["chainabuse:scam_reports"],
       summary: `ChainAbuse: ${abuse.reportCount} scam report(s) found.${abuseNote} Confirm before sending.`,
       chainAbuse: abuse,
@@ -247,7 +202,6 @@ export async function toolCheckAddressRisk(address: string): Promise<AddressRisk
     address,
     risk: "medium",
     blocked: false,
-    whitelisted: false,
     flags: ["unrecognized_address"],
     summary: `${noDataNote} Confirm with user before sending.`,
   };

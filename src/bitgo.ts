@@ -67,6 +67,22 @@ export interface TransfersResponse {
   count: number;
 }
 
+export interface MarketData {
+  latest: {
+    currencies: {
+      USD: {
+        last: number;
+      };
+    };
+  };
+}
+
+export interface FeeEstimate {
+  feePerKb: number;
+  cpfpFeePerKb: number;
+  numBlocks: number;
+}
+
 export interface SendCoinsParams {
   address: string;
   /** Amount in base units: satoshis for BTC, drops for XRP, etc. */
