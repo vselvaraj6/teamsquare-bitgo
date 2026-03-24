@@ -1,32 +1,32 @@
 /**
  * agent.ts
  *
- * Core agentic loop that powers TxGuard.
+ * Core agentic loop powered by OpenAI function calling.
  *
  * How it works:
- *   1. User message + conversation history → Claude API (with tools)
- *   2. If Claude responds with tool_use blocks, execute each tool and feed
- *      the results back as tool_result blocks in the next message
- *   3. Repeat until Claude returns stop_reason: "end_turn" (final answer)
+ *   1. User message + conversation history → OpenAI chat.completions.create() (with tools)
+ *   2. If finish_reason === "tool_calls", execute each requested function and
+ *      append a role:"tool" message with the result for each call
+ *   3. Repeat until finish_reason === "stop" (final answer)
  *
- * Claude is instructed (via system prompt) to always call tools in the
- * correct safety order: get_wallet_balance → check_address_risk → execute_transaction.
+ * OpenAI tool call format differs from Anthropic:
+ *   - Tool requests:  message.tool_calls[].function.{name, arguments (JSON string)}
+ *   - Tool results:   { role: "tool", tool_call_id, content: string }
  *
  * The loop is capped at 10 iterations to prevent infinite cycles.
- * Any unexpected stop reason returns a safe "could not complete" message.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import chalk from "chalk";
 import { config } from "./config.js";
 import { TOOL_DEFINITIONS } from "./tools/definitions.js";
 import { executeTool } from "./tools/executor.js";
 
-const anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
+const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
 /**
- * System prompt that defines Claude's role, rules, and tool usage order.
- * Keeping this strict and explicit produces consistent, predictable behavior.
+ * System prompt defining the agent's role and tool usage rules.
+ * Identical intent to the previous Claude system prompt — model-agnostic.
  */
 const SYSTEM_PROMPT = `You are TxGuard, a crypto transaction security agent. You protect users from risky or fraudulent transactions before they are executed.
 
@@ -48,16 +48,16 @@ Rules:
 
 You are the last line of defense before funds leave the wallet. Be thorough but not paranoid.`;
 
-export type Message = Anthropic.MessageParam;
+export type Message = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
 /**
  * Runs one turn of the agent loop.
  *
  * @param userMessage   - The user's plain-English input for this turn
- * @param history       - Full conversation history (mutated externally by index.ts)
- * @param onToolCall    - Callback fired when Claude requests a tool (for UI display)
+ * @param history       - Full conversation history
+ * @param onToolCall    - Callback fired when the model requests a tool (for UI display)
  * @param onToolResult  - Callback fired after a tool executes (for UI display)
- * @returns             - Claude's final text reply and the updated message history
+ * @returns             - Model's final text reply and the updated message history
  */
 export async function runAgent(
   userMessage: string,
@@ -66,73 +66,68 @@ export async function runAgent(
   onToolResult: (name: string, result: object) => void
 ): Promise<{ reply: string; updatedHistory: Message[] }> {
   const messages: Message[] = [
+    { role: "system", content: SYSTEM_PROMPT },
     ...history,
     { role: "user", content: userMessage },
   ];
 
   let finalText = "";
 
-  // Agentic loop: keep sending tool results back until Claude finishes
+  // Agentic loop: keep sending tool results back until the model finishes
   for (let i = 0; i < 10; i++) {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
       tools: TOOL_DEFINITIONS,
       messages,
     });
 
-    if (response.stop_reason === "end_turn") {
-      // Claude is done — collect the final text block
-      for (const block of response.content) {
-        if (block.type === "text") {
-          finalText = block.text;
-        }
-      }
-      messages.push({ role: "assistant", content: response.content });
+    const choice = response.choices[0];
+
+    if (choice.finish_reason === "stop") {
+      // Model is done — collect the final text
+      finalText = choice.message.content ?? "";
+      messages.push({ role: "assistant", content: finalText });
       break;
     }
 
-    if (response.stop_reason === "tool_use") {
-      // Claude wants to call one or more tools
-      messages.push({ role: "assistant", content: response.content });
+    if (choice.finish_reason === "tool_calls") {
+      // Model wants to call one or more tools
+      const assistantMessage = choice.message;
+      messages.push(assistantMessage); // append assistant turn with tool_calls
 
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const toolCall of assistantMessage.tool_calls ?? []) {
+        if (toolCall.type !== "function") continue;
+        const name = toolCall.function.name;
+        // OpenAI returns arguments as a JSON string — parse it
+        const input = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
 
-      for (const block of response.content) {
-        if (block.type === "tool_use") {
-          // Notify the UI that a tool is being called
-          onToolCall(block.name, block.input as Record<string, unknown>);
+        // Notify the UI that a tool is being called
+        onToolCall(name, input);
 
-          // Execute the tool and collect the result
-          const result = await executeTool(
-            block.name,
-            block.input as Record<string, unknown>
-          );
+        // Execute the tool
+        const result = await executeTool(name, input);
 
-          // Notify the UI of the result
-          onToolResult(block.name, result);
+        // Notify the UI of the result
+        onToolResult(name, result);
 
-          // Package result for the next API call
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: JSON.stringify(result),
-          });
-        }
+        // Append tool result as a role:"tool" message (OpenAI format)
+        messages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(result),
+        });
       }
-
-      // Feed all tool results back to Claude in a single user turn
-      messages.push({ role: "user", content: toolResults });
       continue;
     }
 
-    // Unexpected stop reason (e.g. max_tokens) — fail safely
+    // Unexpected finish reason — fail safely
     finalText = "Transaction analysis could not be completed. Please try again.";
     break;
   }
 
-  return { reply: finalText, updatedHistory: messages };
+  // Return history without the system prompt (we re-add it each turn)
+  const updatedHistory = messages.filter((m) => m.role !== "system");
+  return { reply: finalText, updatedHistory };
 }
 
 // ─── UI Formatting Helpers ────────────────────────────────────────────────────

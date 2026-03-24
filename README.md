@@ -35,7 +35,7 @@ Claude decides **which tools to call and when**. Safety checks run both when Cla
 | Node.js | >= 18.0 | Required for native `fetch` support |
 | npm | >= 9.0 | Comes with Node 18+ |
 | BitGo testnet account | — | Sign up at app.bitgo-test.com |
-| Anthropic API key | — | Get one at console.anthropic.com |
+| OpenAI API key | — | Get one at platform.openai.com |
 
 ### Getting BitGo testnet credentials
 
@@ -44,9 +44,9 @@ Claude decides **which tools to call and when**. Safety checks run both when Cla
 3. Create a wallet (or use an existing one) and copy the **Wallet ID** from wallet settings
 4. Fund the testnet wallet using a BTC testnet faucet
 
-### Getting an Anthropic API key
+### Getting an OpenAI API key
 
-1. Log in to [console.anthropic.com](https://console.anthropic.com)
+1. Log in to [platform.openai.com](https://platform.openai.com)
 2. Go to **API Keys** and create a new key
 
 ---
@@ -71,7 +71,7 @@ Open `.env` and fill in your credentials:
 BITGO_ACCESS_TOKEN=your_bitgo_testnet_access_token
 BITGO_WALLET_ID=your_wallet_id
 BITGO_COIN=tbtc
-ANTHROPIC_API_KEY=your_anthropic_api_key
+OPENAI_API_KEY=your_openai_api_key
 ```
 
 ```bash
@@ -286,6 +286,6 @@ Running as an MCP server means **any** AI agent can plug in and inherit safe cry
 | Component | Technology |
 |-----------|-----------|
 | Language | TypeScript (Node.js 18+) |
-| LLM | Anthropic Claude `claude-sonnet-4-6` via `@anthropic-ai/sdk` |
+| LLM | OpenAI `gpt-4o` via `openai` SDK |
 | Crypto | BitGo testnet REST API |
 | CLI | Node.js `readline` + `chalk` |

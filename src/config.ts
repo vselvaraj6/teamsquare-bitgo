@@ -31,8 +31,8 @@ export const config = {
     /** BitGo testnet base URL — do NOT use app.bitgo.com in production */
     baseUrl: "https://app.bitgo-test.com",
   },
-  anthropic: {
-    /** Anthropic API key for Claude */
-    apiKey: require_env("ANTHROPIC_API_KEY"),
+  openai: {
+    /** OpenAI API key */
+    apiKey: require_env("OPENAI_API_KEY"),
   },
 };
