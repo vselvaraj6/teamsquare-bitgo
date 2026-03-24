@@ -1,4 +1,4 @@
-# TxGuard — Natural Language Transaction Guard
+# TeamSquare TxGuard — Natural Language Transaction Guard
 
 > **Hackathon project** — BitGo + Anthropic AI Safety Layer
 >
