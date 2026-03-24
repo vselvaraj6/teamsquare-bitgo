@@ -63,7 +63,14 @@ async function main() {
   const wallet = await getWallet();
   process.stdout.write(chalk.green(" ✓\n"));
 
-  printBanner(wallet.coin, wallet.spendableBalance ?? wallet.balance, wallet.label ?? wallet.id);
+  // SOL returns *String fields; BTC returns numeric fields — handle both
+  const spendable =
+    wallet.spendableBalance ??
+    (wallet.spendableBalanceString ? Number(wallet.spendableBalanceString) : undefined) ??
+    wallet.balance ??
+    (wallet.balanceString ? Number(wallet.balanceString) : 0);
+
+  printBanner(wallet.coin, spendable, wallet.label ?? wallet.id);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -113,6 +120,9 @@ async function main() {
       prompt();
     });
   };
+
+  // Gracefully handle stdin closing (e.g. piped input in tests)
+  rl.on("close", () => process.exit(0));
 
   prompt();
 }
