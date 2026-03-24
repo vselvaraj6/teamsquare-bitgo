@@ -36,6 +36,8 @@ export const config = {
      */
     baseUrl: "https://app.bitgo-test.com",
     expressUrl: process.env.BITGO_EXPRESS_URL ?? "http://localhost:3080",
+    /** Wallet passphrase — required by BitGo Express to decrypt the user key for signing */
+    walletPassphrase: process.env.BITGO_WALLET_PASSPHRASE ?? "",
   },
   openai: {
     /** OpenAI API key */

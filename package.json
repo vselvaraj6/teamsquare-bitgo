@@ -4,7 +4,8 @@
   "description": "Natural Language Transaction Guard — AI safety layer for crypto agents",
   "type": "module",
   "scripts": {
-    "start": "npx tsx src/index.ts",
+    "express": "npx @bitgo/express@latest --env test --bind localhost --port 3080 --disableSSL",
+    "start": "npx @bitgo/express@latest --env test --bind localhost --port 3080 --disableSSL & sleep 3 && npx tsx src/index.ts",
     "mcp": "npx tsx src/mcp-server.ts",
     "typecheck": "tsc --noEmit"
   },

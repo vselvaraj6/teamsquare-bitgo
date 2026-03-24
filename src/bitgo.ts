@@ -16,7 +16,7 @@
 
 import { config } from "./config.js";
 
-const { baseUrl, expressUrl, accessToken, walletId, coin } = config.bitgo;
+const { baseUrl, expressUrl, accessToken, walletId, coin, walletPassphrase } = config.bitgo;
 
 /** Standard headers sent on every BitGo request */
 const headers = {
@@ -161,11 +161,12 @@ export async function getTransfers(limit: number = 10): Promise<TransfersRespons
  * Returns the transaction ID and status on success.
  */
 export async function sendCoins(params: SendCoinsParams): Promise<SendCoinsResult> {
+  const passphrase = params.walletPassphrase || walletPassphrase;
   const body = {
     address: params.address,
     amount: params.amount,
     ...(params.memo ? { memo: params.memo } : {}),
-    ...(params.walletPassphrase ? { walletPassphrase: params.walletPassphrase } : {}),
+    ...(passphrase ? { walletPassphrase: passphrase } : {}),
   };
 
   // sendcoins is a BitGo Express endpoint — must route through local Express
