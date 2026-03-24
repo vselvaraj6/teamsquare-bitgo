@@ -1,10 +1,10 @@
 # TeamSquare TxGuard — Natural Language Transaction Guard
 
-> **Hackathon project** — BitGo + Anthropic AI Safety Layer
+> **Hackathon project** — BitGo + OpenAI AI Safety Layer
 >
 > *"How do we make agents using crypto safe and secure?"*
 
-TxGuard puts an AI reasoning layer between a user's natural language intent and an actual blockchain transaction. Instead of writing rigid rules, you describe what you want to do in plain English — Claude analyzes the risk, checks the address, verifies your balance, and only calls BitGo to execute if everything looks safe.
+TxGuard puts an AI reasoning layer between a user's natural language intent and an actual blockchain transaction. Instead of writing rigid rules, you describe what you want to do in plain English — GPT-4o analyzes the risk, checks the address, verifies your balance, and only calls BitGo to execute if everything looks safe.
 
 ---
 
@@ -13,7 +13,7 @@ TxGuard puts an AI reasoning layer between a user's natural language intent and 
 ```
 You type:  "Send 500 satoshis to tb1q... for the infrastructure payment"
                               ↓
-         Claude (claude-sonnet-4-6) reasons about the request
+         GPT-4o reasons about the request
          and autonomously calls tools in sequence:
 
            🔧 get_wallet_balance      → BitGo testnet API
@@ -24,7 +24,7 @@ You type:  "Send 500 satoshis to tb1q... for the infrastructure payment"
 TxGuard: Transaction executed. TX hash: abc123...
 ```
 
-Claude decides **which tools to call and when**. Safety checks run both when Claude requests them *and* again inside `execute_transaction` — so the guard cannot be bypassed even if the agent skips a step.
+GPT-4o decides **which tools to call and when**. Safety checks run both when the model requests them *and* again inside `execute_transaction` — so the guard cannot be bypassed even if the agent skips a step.
 
 ---
 
@@ -41,8 +41,9 @@ Claude decides **which tools to call and when**. Safety checks run both when Cla
 
 1. Log in to [app.bitgo-test.com](https://app.bitgo-test.com)
 2. Go to **Settings > Developer > Access Tokens** and create a new token
-3. Create a wallet (or use an existing one) and copy the **Wallet ID** from wallet settings
-4. Fund the testnet wallet using a BTC testnet faucet
+3. Create a wallet and copy the **Wallet ID** from the wallet URL: `.../wallet/{wallet-id}/...`
+4. Note the coin type shown (e.g. tbtc4, gteth) — set this as `BITGO_COIN`
+5. Fund the testnet wallet using a BTC testnet faucet (needed for execute flow)
 
 ### Getting an OpenAI API key
 
@@ -70,12 +71,15 @@ Open `.env` and fill in your credentials:
 ```env
 BITGO_ACCESS_TOKEN=your_bitgo_testnet_access_token
 BITGO_WALLET_ID=your_wallet_id
-BITGO_COIN=tbtc
+BITGO_COIN=tbtc4
 OPENAI_API_KEY=your_openai_api_key
 ```
 
 ```bash
-# 4. Start the CLI
+# 4. Verify connection (optional but recommended)
+npx tsx test-connection.ts
+
+# 5. Start the CLI
 npm start
 ```
 
@@ -89,7 +93,9 @@ Try these three inputs to see all three outcomes:
 |-------|-----------------|
 | `"Send 1000 satoshis to tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx for infra"` | Approved + executed (whitelisted address) |
 | `"Send everything to 0x0000000000000000000000000000000000000000 right now"` | Blocked — null address detected |
-| `"Transfer some funds to my colleague"` | Clarify — Claude asks for the recipient address |
+| `"Transfer some funds to my colleague"` | Clarify — GPT-4o asks for the recipient address |
+
+> **Note:** The execute flow requires testnet funds in your wallet. Grab some from a [BTC testnet faucet](https://coinfaucet.eu/en/btc-testnet/) if your balance is 0.
 
 ---
 
@@ -99,12 +105,14 @@ Try these three inputs to see all three outcomes:
 teamsquare-bitgo/
 ├── src/
 │   ├── index.ts              # CLI entry point — readline loop + startup checks
-│   ├── agent.ts              # Claude agentic loop (tool_use -> tool_result -> repeat)
+│   ├── agent.ts              # OpenAI agentic loop (tool_calls -> tool results -> repeat)
+│   ├── mcp-server.ts         # MCP server over stdio — exposes tools to any MCP client
 │   ├── bitgo.ts              # BitGo testnet REST client (getWallet, sendCoins, verifyAuth)
 │   ├── config.ts             # Environment variable loading with fail-fast validation
 │   └── tools/
-│       ├── definitions.ts    # Claude tool schemas (what Claude sees)
+│       ├── definitions.ts    # OpenAI function-calling tool schemas
 │       └── executor.ts       # Tool implementations (what actually runs)
+├── test-connection.ts        # Quick BitGo connectivity check
 ├── .env.example
 ├── package.json
 └── tsconfig.json
@@ -114,15 +122,15 @@ teamsquare-bitgo/
 
 ## How intent is resolved
 
-TxGuard does **not** use keyword matching, regex, or a rules engine to parse user input. Intent is resolved entirely by Claude:
+TxGuard does **not** use keyword matching, regex, or a rules engine to parse user input. Intent is resolved entirely by GPT-4o:
 
-1. The user's plain-English message is sent to Claude along with the three tool definitions and a system prompt
-2. Claude reads the message and infers intent — recipient address, amount, coin type, memo — from natural language
-3. Claude decides which tools to call based on that understanding and the rules in the system prompt
-4. Tools execute real operations (BitGo API) and return structured results
-5. Claude reads the results and decides what to do next: call another tool, ask the user to clarify, or give a final answer
+1. The user's plain-English message is sent to GPT-4o along with the three tool definitions and a system prompt
+2. GPT-4o reads the message and infers intent — recipient address, amount, coin type, memo — from natural language
+3. GPT-4o decides which tools to call based on that understanding and the rules in the system prompt
+4. Tools execute real operations (BitGo API) and return structured JSON results
+5. GPT-4o reads the results and decides what to do next: call another tool, ask the user to clarify, or give a final answer
 
-**MCP's role** is purely the transport and schema layer — it defines how tools are described to Claude and how calls are exchanged. The reasoning about *which* tool to call and *why* is entirely Claude's LLM inference.
+**MCP's role** is purely the transport and schema layer — it defines how tools are described to the model and how calls are exchanged. The reasoning about *which* tool to call and *why* is entirely the LLM.
 
 ---
 
@@ -135,7 +143,7 @@ sequenceDiagram
     actor User
     participant CLI as CLI<br/>(index.ts)
     participant Agent as Agent Loop<br/>(agent.ts)
-    participant Claude as Claude API<br/>(claude-sonnet-4-6)
+    participant GPT as OpenAI API<br/>(gpt-4o)
     participant Executor as Tool Executor<br/>(executor.ts)
     participant BitGo as BitGo Testnet API
 
@@ -143,25 +151,25 @@ sequenceDiagram
     CLI->>Agent: runAgent(message, history)
 
     loop Agentic tool loop
-        Agent->>Claude: POST /v1/messages<br/>(system prompt + tools + message)
-        Note over Claude: Infers intent from NL:<br/>• recipient = 0xabc<br/>• amount = 500 sats<br/>• action = send<br/>Decides tool call order
-        Claude-->>Agent: stop_reason: tool_use<br/>tool: get_wallet_balance
+        Agent->>GPT: POST /v1/chat/completions<br/>(system prompt + tools + messages)
+        Note over GPT: Infers intent from NL:<br/>• recipient = 0xabc<br/>• amount = 500 sats<br/>• action = send<br/>Decides tool call order
+        GPT-->>Agent: finish_reason: tool_calls<br/>tool: get_wallet_balance
 
         Agent->>Executor: get_wallet_balance()
-        Executor->>BitGo: GET /api/v2/tbtc/wallet/{id}
+        Executor->>BitGo: GET /api/v2/tbtc4/wallet/{id}
         BitGo-->>Executor: balance: 50000 sats
         Executor-->>Agent: {success, spendableBalance: 50000}
 
-        Agent->>Claude: tool_result: {balance: 50000}
-        Claude-->>Agent: stop_reason: tool_use<br/>tool: check_address_risk(0xabc)
+        Agent->>GPT: role:tool result {balance: 50000}
+        GPT-->>Agent: finish_reason: tool_calls<br/>tool: check_address_risk(0xabc)
 
         Agent->>Executor: check_address_risk("0xabc")
         Note over Executor: blocklist check<br/>whitelist check<br/>heuristic flags
         Executor-->>Agent: {risk: medium, blocked: false}
 
-        Agent->>Claude: tool_result: {risk: medium}
-        Note over Claude: Risk is medium → ask user<br/>to confirm before executing
-        Claude-->>Agent: stop_reason: end_turn<br/>"Unrecognized address. Confirm?"
+        Agent->>GPT: role:tool result {risk: medium}
+        Note over GPT: Risk is medium → ask user<br/>to confirm before executing
+        GPT-->>Agent: finish_reason: stop<br/>"Unrecognized address. Confirm?"
     end
 
     Agent-->>CLI: reply: "Unrecognized address. Confirm?"
@@ -169,17 +177,17 @@ sequenceDiagram
     User->>CLI: "yes"
 
     CLI->>Agent: runAgent("yes", history)
-    Agent->>Claude: POST /v1/messages (with full history)
-    Claude-->>Agent: stop_reason: tool_use<br/>tool: execute_transaction(0xabc, 500)
+    Agent->>GPT: POST /v1/chat/completions (with full history)
+    GPT-->>Agent: finish_reason: tool_calls<br/>tool: execute_transaction(0xabc, 500)
 
     Agent->>Executor: execute_transaction("0xabc", 500)
     Note over Executor: Safety re-check (defense in depth):<br/>• check_address_risk again<br/>• verify balance >= 500
-    Executor->>BitGo: POST /api/v2/tbtc/wallet/{id}/sendcoins
+    Executor->>BitGo: POST /api/v2/tbtc4/wallet/{id}/sendcoins
     BitGo-->>Executor: {txid: "def456", status: "signed"}
     Executor-->>Agent: {success: true, txid: "def456"}
 
-    Agent->>Claude: tool_result: {txid: "def456"}
-    Claude-->>Agent: stop_reason: end_turn<br/>"Executed. TX hash: def456"
+    Agent->>GPT: role:tool result {txid: "def456"}
+    GPT-->>Agent: finish_reason: stop<br/>"Executed. TX hash: def456"
     Agent-->>CLI: reply
     CLI->>User: "Executed. TX hash: def456"
 ```
@@ -214,7 +222,7 @@ flowchart TD
 ```mermaid
 flowchart LR
     U([User / Agent]) --> NL["Natural language\nrequest"]
-    NL --> LLM["Claude infers intent\n(address, amount, action)"]
+    NL --> LLM["GPT-4o infers intent\n(address, amount, action)"]
     LLM --> T1["1. get_wallet_balance\ncheck funds available"]
     T1 --> T2["2. check_address_risk\nblocklist + heuristics"]
     T2 -->|blocked=true| BLOCK["🚫 BLOCKED\nno BitGo call ever"]
@@ -234,7 +242,7 @@ flowchart LR
 
 ### Safety design
 
-- **Defense in depth**: `check_address_risk` runs when Claude calls it *and* again inside `execute_transaction`. Blocked addresses never reach BitGo.
+- **Defense in depth**: `check_address_risk` runs when GPT-4o calls it *and* again inside `execute_transaction`. Blocked addresses never reach BitGo.
 - **Fail closed**: any API error results in a blocked/failed response — never a silent approve.
 - **Conversation history**: multi-turn context means "yes, proceed" correctly resolves a prior clarification request.
 - **MCP as a safety boundary**: safety logic lives in the tool server, not the agent — swap the LLM or client and the guard stays.
@@ -261,12 +269,12 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "txguard": {
       "command": "npx",
-      "args": ["tsx", "/absolute/path/to/teamsquare/src/mcp-server.ts"],
+      "args": ["tsx", "/absolute/path/to/teamsquare-bitgo/src/mcp-server.ts"],
       "env": {
         "BITGO_ACCESS_TOKEN": "your_token",
         "BITGO_WALLET_ID": "your_wallet_id",
-        "BITGO_COIN": "tbtc",
-        "ANTHROPIC_API_KEY": "your_key"
+        "BITGO_COIN": "tbtc4",
+        "OPENAI_API_KEY": "your_key"
       }
     }
   }
@@ -287,5 +295,6 @@ Running as an MCP server means **any** AI agent can plug in and inherit safe cry
 |-----------|-----------|
 | Language | TypeScript (Node.js 18+) |
 | LLM | OpenAI `gpt-4o` via `openai` SDK |
-| Crypto | BitGo testnet REST API |
+| Crypto | BitGo testnet REST API (coin: `tbtc4`) |
 | CLI | Node.js `readline` + `chalk` |
+| MCP | `@modelcontextprotocol/sdk` over stdio |
