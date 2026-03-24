@@ -16,7 +16,7 @@
 
 import { config } from "./config.js";
 
-const { baseUrl, accessToken, walletId, coin } = config.bitgo;
+const { baseUrl, expressUrl, accessToken, walletId, coin } = config.bitgo;
 
 /** Standard headers sent on every BitGo request */
 const headers = {
@@ -98,8 +98,8 @@ export interface SendCoinsParams {
  * Wraps fetch with auth headers and error handling.
  * Throws a descriptive Error if the response is not 2xx.
  */
-async function bitgoFetch(path: string, options?: RequestInit) {
-  const res = await fetch(`${baseUrl}${path}`, {
+async function bitgoFetch(path: string, options?: RequestInit, base = baseUrl) {
+  const res = await fetch(`${base}${path}`, {
     ...options,
     headers: { ...headers, ...(options?.headers ?? {}) },
   });
@@ -168,10 +168,11 @@ export async function sendCoins(params: SendCoinsParams): Promise<SendCoinsResul
     ...(params.walletPassphrase ? { walletPassphrase: params.walletPassphrase } : {}),
   };
 
+  // sendcoins is a BitGo Express endpoint — must route through local Express
   const data = await bitgoFetch(`/api/v2/${coin}/wallet/${walletId}/sendcoins`, {
     method: "POST",
     body: JSON.stringify(body),
-  }) as SendCoinsResult;
+  }, expressUrl) as SendCoinsResult;
 
   return data;
 }

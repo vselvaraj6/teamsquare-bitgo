@@ -26,10 +26,16 @@ export const config = {
     accessToken: require_env("BITGO_ACCESS_TOKEN"),
     /** ID of the wallet to send from (found in BitGo dashboard) */
     walletId: require_env("BITGO_WALLET_ID"),
-    /** Coin type, e.g. "tbtc" for testnet Bitcoin */
+    /** Coin type, e.g. "tsol" for testnet Solana */
     coin: process.env.BITGO_COIN ?? "tbtc",
-    /** BitGo testnet base URL — do NOT use app.bitgo.com in production */
+    /**
+     * BitGo API base URL.
+     * Read operations (balance, transfers) → app.bitgo-test.com
+     * Write operations (sendcoins) require BitGo Express → localhost:3080
+     * Set BITGO_EXPRESS_URL to your local Express instance for transactions.
+     */
     baseUrl: "https://app.bitgo-test.com",
+    expressUrl: process.env.BITGO_EXPRESS_URL ?? "http://localhost:3080",
   },
   openai: {
     /** OpenAI API key */
