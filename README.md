@@ -112,32 +112,124 @@ teamsquare-bitgo/
 
 ---
 
+## How intent is resolved
+
+TxGuard does **not** use keyword matching, regex, or a rules engine to parse user input. Intent is resolved entirely by Claude:
+
+1. The user's plain-English message is sent to Claude along with the three tool definitions and a system prompt
+2. Claude reads the message and infers intent — recipient address, amount, coin type, memo — from natural language
+3. Claude decides which tools to call based on that understanding and the rules in the system prompt
+4. Tools execute real operations (BitGo API) and return structured results
+5. Claude reads the results and decides what to do next: call another tool, ask the user to clarify, or give a final answer
+
+**MCP's role** is purely the transport and schema layer — it defines how tools are described to Claude and how calls are exchanged. The reasoning about *which* tool to call and *why* is entirely Claude's LLM inference.
+
+---
+
 ## Architecture
 
+### Intent → Execution flow (CLI mode)
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant CLI as CLI<br/>(index.ts)
+    participant Agent as Agent Loop<br/>(agent.ts)
+    participant Claude as Claude API<br/>(claude-sonnet-4-6)
+    participant Executor as Tool Executor<br/>(executor.ts)
+    participant BitGo as BitGo Testnet API
+
+    User->>CLI: "Send 500 satoshis to 0xabc... for vendor"
+    CLI->>Agent: runAgent(message, history)
+
+    loop Agentic tool loop
+        Agent->>Claude: POST /v1/messages<br/>(system prompt + tools + message)
+        Note over Claude: Infers intent from NL:<br/>• recipient = 0xabc<br/>• amount = 500 sats<br/>• action = send<br/>Decides tool call order
+        Claude-->>Agent: stop_reason: tool_use<br/>tool: get_wallet_balance
+
+        Agent->>Executor: get_wallet_balance()
+        Executor->>BitGo: GET /api/v2/tbtc/wallet/{id}
+        BitGo-->>Executor: balance: 50000 sats
+        Executor-->>Agent: {success, spendableBalance: 50000}
+
+        Agent->>Claude: tool_result: {balance: 50000}
+        Claude-->>Agent: stop_reason: tool_use<br/>tool: check_address_risk(0xabc)
+
+        Agent->>Executor: check_address_risk("0xabc")
+        Note over Executor: blocklist check<br/>whitelist check<br/>heuristic flags
+        Executor-->>Agent: {risk: medium, blocked: false}
+
+        Agent->>Claude: tool_result: {risk: medium}
+        Note over Claude: Risk is medium → ask user<br/>to confirm before executing
+        Claude-->>Agent: stop_reason: end_turn<br/>"Unrecognized address. Confirm?"
+    end
+
+    Agent-->>CLI: reply: "Unrecognized address. Confirm?"
+    CLI->>User: "Unrecognized address. Confirm?"
+    User->>CLI: "yes"
+
+    CLI->>Agent: runAgent("yes", history)
+    Agent->>Claude: POST /v1/messages (with full history)
+    Claude-->>Agent: stop_reason: tool_use<br/>tool: execute_transaction(0xabc, 500)
+
+    Agent->>Executor: execute_transaction("0xabc", 500)
+    Note over Executor: Safety re-check (defense in depth):<br/>• check_address_risk again<br/>• verify balance >= 500
+    Executor->>BitGo: POST /api/v2/tbtc/wallet/{id}/sendcoins
+    BitGo-->>Executor: {txid: "def456", status: "signed"}
+    Executor-->>Agent: {success: true, txid: "def456"}
+
+    Agent->>Claude: tool_result: {txid: "def456"}
+    Claude-->>Agent: stop_reason: end_turn<br/>"Executed. TX hash: def456"
+    Agent-->>CLI: reply
+    CLI->>User: "Executed. TX hash: def456"
 ```
-+-------------------------------------------------------------+
-|                        CLI (index.ts)                        |
-|              readline loop + conversation history            |
-+-------------------------+-----------------------------------+
-                          | user message + history
-                          v
-+-------------------------------------------------------------+
-|                     Agent (agent.ts)                         |
-|                                                              |
-|   POST /v1/messages --> Claude claude-sonnet-4-6             |
-|        ^                      |                              |
-|        | tool_result           | tool_use                    |
-|        +----------------------+                              |
-+-------------------------+-----------------------------------+
-                          | tool dispatch
-                          v
-+-------------------------------------------------------------+
-|                   Tool Executor (executor.ts)                |
-|                                                              |
-|   get_wallet_balance  --> BitGo GET /wallet/{id}             |
-|   check_address_risk  --> local blocklist/whitelist          |
-|   execute_transaction --> safety check --> BitGo sendcoins   |
-+-------------------------------------------------------------+
+
+### MCP mode (Claude Desktop or any agent)
+
+```mermaid
+flowchart TD
+    A["Any MCP Client\n(Claude Desktop / AI Agent)"] -->|stdio transport| B
+
+    subgraph B["TxGuard MCP Server\n(mcp-server.ts)"]
+        direction TB
+        T1["Tool: get_wallet_balance"]
+        T2["Tool: check_address_risk"]
+        T3["Tool: execute_transaction\n⚠️ safety re-check inside"]
+    end
+
+    T1 -->|GET /wallet| C[(BitGo Testnet API)]
+    T2 --> D{Blocklist /\nWhitelist check}
+    T3 -->|POST /sendcoins\nonly if safe| C
+
+    D -->|blocked| E[Return: blocked=true\nNo BitGo call]
+    D -->|clear| F[Return: risk level + flags]
+
+    style E fill:#ff4444,color:#fff
+    style B fill:#1a1a2e,color:#fff
+    style C fill:#0f3460,color:#fff
+```
+
+### Safety layers
+
+```mermaid
+flowchart LR
+    U([User / Agent]) --> NL["Natural language\nrequest"]
+    NL --> LLM["Claude infers intent\n(address, amount, action)"]
+    LLM --> T1["1. get_wallet_balance\ncheck funds available"]
+    T1 --> T2["2. check_address_risk\nblocklist + heuristics"]
+    T2 -->|blocked=true| BLOCK["🚫 BLOCKED\nno BitGo call ever"]
+    T2 -->|risk=medium/high| CONFIRM["⚠️ Ask user\nto confirm"]
+    T2 -->|risk=low / whitelisted| T3
+    CONFIRM -->|user says yes| T3["3. execute_transaction\ninternal safety re-check"]
+    CONFIRM -->|user says no| CANCEL["❌ Cancelled"]
+    T3 -->|passes re-check| BITGO["BitGo sendcoins\ntestnet"]
+    T3 -->|fails re-check| BLOCK2["🚫 BLOCKED\ndefense in depth"]
+    BITGO --> HASH["✅ TX Hash returned"]
+
+    style BLOCK fill:#ff4444,color:#fff
+    style BLOCK2 fill:#ff4444,color:#fff
+    style CANCEL fill:#ff8800,color:#fff
+    style HASH fill:#00aa44,color:#fff
 ```
 
 ### Safety design
@@ -145,6 +237,7 @@ teamsquare-bitgo/
 - **Defense in depth**: `check_address_risk` runs when Claude calls it *and* again inside `execute_transaction`. Blocked addresses never reach BitGo.
 - **Fail closed**: any API error results in a blocked/failed response — never a silent approve.
 - **Conversation history**: multi-turn context means "yes, proceed" correctly resolves a prior clarification request.
+- **MCP as a safety boundary**: safety logic lives in the tool server, not the agent — swap the LLM or client and the guard stays.
 
 ---
 
