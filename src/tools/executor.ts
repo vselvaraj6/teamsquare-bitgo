@@ -16,7 +16,7 @@
 import chalk from "chalk";
 import { getWallet, getTransfers, sendCoins } from "../bitgo.js";
 import { config } from "../config.js";
-import { checkAddressOnChain, checkAddressOnChainAbuse } from "../riskApi.js";
+import { checkAddressOnChainAbuse } from "../riskApi.js";
 
 
 // ─── Tool: get_wallet_balance ─────────────────────────────────────────────────
@@ -109,14 +109,10 @@ export interface AddressRiskResult {
  * Evaluates the risk of sending to a given address.
  *
  * Checks in order:
- *   1. Heuristic patterns  → catch obviously malformed addresses (no API needed)
- *   2. GoPlus Security API → real-time automated threat intelligence
- *   3. ChainAbuse API      → community scam reports (enrichment layer)
+ *   1. Heuristic patterns → catch obviously malformed addresses (no API needed)
+ *   2. ChainAbuse API     → community-reported scam cases
  *
- * No local blocklist or whitelist — all address data comes from live APIs
- * so it stays current without any code changes.
- *
- * Both APIs fail open: unavailability never blocks a transaction.
+ * Fails open: API unavailability never blocks a transaction.
  */
 export async function toolCheckAddressRisk(address: string): Promise<AddressRiskResult> {
   const flags: string[] = [];
@@ -137,49 +133,7 @@ export async function toolCheckAddressRisk(address: string): Promise<AddressRisk
     };
   }
 
-  // 4. GoPlus Security API — real-time threat intelligence
-  const apiResult = await checkAddressOnChain(address);
-
-  if (apiResult.supported && apiResult.found && apiResult.flags) {
-    const f = apiResult.flags;
-    const apiFlags: string[] = [];
-
-    if (f.malicious)       apiFlags.push("goplus:malicious");
-    if (f.phishing)        apiFlags.push("goplus:phishing");
-    if (f.stealing)        apiFlags.push("goplus:stealing_attack");
-    if (f.sanctioned)      apiFlags.push("goplus:sanctioned");
-    if (f.moneyLaundering) apiFlags.push("goplus:money_laundering");
-    if (f.darkweb)         apiFlags.push("goplus:darkweb_activity");
-    if (f.mixer)           apiFlags.push("goplus:mixer");
-    if (f.honeypot)        apiFlags.push("goplus:honeypot");
-    if (f.cybercrime)      apiFlags.push("goplus:cybercrime");
-
-    if (apiFlags.length > 0) {
-      // GoPlus flagged — enrich with ChainAbuse scam reports
-      const abuse = await checkAddressOnChainAbuse(address);
-      const abuseNote = buildAbuseNote(abuse);
-
-      return {
-        address,
-        risk: "critical",
-        blocked: true,
-        flags: apiFlags,
-        summary: `BLOCKED by GoPlus (${apiResult.source}): ${apiFlags.join(", ")}.${abuseNote}`,
-        chainAbuse: abuse.available ? abuse : undefined,
-      } as AddressRiskResult;
-    }
-
-    // GoPlus has data and found no flags — address is clean
-    return {
-      address,
-      risk: "low",
-      blocked: false,
-      flags: [`goplus:clean (source: ${apiResult.source})`],
-      summary: `Address verified clean by GoPlus Security (${apiResult.source}). Safe to proceed.`,
-    };
-  }
-
-  // GoPlus has no data — call ChainAbuse to check community scam reports
+  // 2. ChainAbuse API — community scam reports
   const abuse = await checkAddressOnChainAbuse(address);
   const abuseNote = buildAbuseNote(abuse);
 
@@ -187,23 +141,29 @@ export async function toolCheckAddressRisk(address: string): Promise<AddressRisk
     return {
       address,
       risk: "high",
-      blocked: false,
+      blocked: true,
       flags: ["chainabuse:scam_reports"],
-      summary: `ChainAbuse: ${abuse.reportCount} scam report(s) found.${abuseNote} Confirm before sending.`,
+      summary: `BLOCKED — ChainAbuse: ${abuse.reportCount} scam report(s) found.${abuseNote}`,
       chainAbuse: abuse,
     } as AddressRiskResult;
   }
 
-  const noDataNote = !apiResult.supported
-    ? "Chain format not covered by GoPlus."
-    : "No threat data found in GoPlus or ChainAbuse.";
+  if (!abuse.available) {
+    return {
+      address,
+      risk: "medium",
+      blocked: false,
+      flags: ["chainabuse:unavailable"],
+      summary: "ChainAbuse API unavailable or key not set. Confirm with user before sending.",
+    };
+  }
 
   return {
     address,
-    risk: "medium",
+    risk: "low",
     blocked: false,
-    flags: ["unrecognized_address"],
-    summary: `${noDataNote} Confirm with user before sending.`,
+    flags: ["chainabuse:clean"],
+    summary: "No scam reports found on ChainAbuse. Safe to proceed.",
   };
 }
 
