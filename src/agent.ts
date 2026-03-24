@@ -171,20 +171,24 @@ export function formatToolResult(name: string, result: Record<string, unknown>):
         : risk === "MEDIUM" ? chalk.blue
         : chalk.green;
 
-      const statusIcon = blocked ? "🚫 BLOCKED" : risk === "LOW" ? "✅ APPROVED" : "⚠️  CAUTION";
+      const statusIcon = blocked ? "BLOCKED" : risk === "LOW" ? "APPROVED" : "CAUTION";
+
+      const W = 38; // content width inside each row
+      const pad = (s: string, w: number) => s.length >= w ? s.slice(0, w) : s + " ".repeat(w - s.length);
 
       const lines = [
         color(`┌──────────────────────────────────────────────────┐`),
-        color(`│             🛡️  ADDRESS SAFETY REPORT             │`),
+        color(`│          ADDRESS SAFETY REPORT                   │`),
         color(`├──────────────────────────────────────────────────┤`),
-        color(`│  Address: `) + chalk.white(address.length > 38 ? address.slice(0, 35) + "..." : address.padEnd(38)) + color(` │`),
-        color(`│  Risk   : `) + chalk.bold(risk.padEnd(38)) + color(` │`),
-        color(`│  Status : `) + chalk.bold(statusIcon.padEnd(38)) + color(` │`),
+        color(`│  Address: `) + chalk.white(pad(address, W)) + color(` │`),
+        color(`│  Risk   : `) + chalk.bold(pad(risk, W)) + color(` │`),
+        color(`│  Status : `) + chalk.bold(pad(statusIcon, W)) + color(` │`),
       ];
 
       if (flags.length > 0) {
+        const flagStr = flags.join(", ");
         lines.push(color(`├──────────────────────────────────────────────────┤`));
-        lines.push(color(`│  Flags  : `) + chalk.gray(flags.join(", ").padEnd(38)) + color(` │`));
+        lines.push(color(`│  Flags  : `) + chalk.gray(pad(flagStr, W)) + color(` │`));
       }
 
       lines.push(color(`└──────────────────────────────────────────────────┘`));
