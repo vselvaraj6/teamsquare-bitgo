@@ -148,6 +148,46 @@ teamsquare-bitgo/
 
 ---
 
+## MCP Server
+
+TxGuard also runs as a proper [Model Context Protocol](https://modelcontextprotocol.io) server.
+Any MCP-compatible client (Claude Desktop, other AI agents) can connect and get guarded BitGo access.
+
+### Run the MCP server
+
+```bash
+npm run mcp
+```
+
+### Connect from Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "txguard": {
+      "command": "npx",
+      "args": ["tsx", "/absolute/path/to/teamsquare/src/mcp-server.ts"],
+      "env": {
+        "BITGO_ACCESS_TOKEN": "your_token",
+        "BITGO_WALLET_ID": "your_wallet_id",
+        "BITGO_COIN": "tbtc",
+        "ANTHROPIC_API_KEY": "your_key"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop — the three tools (`get_wallet_balance`, `check_address_risk`, `execute_transaction`) will appear automatically.
+
+### Why MCP matters
+
+Running as an MCP server means **any** AI agent can plug in and inherit safe crypto operations. The safety checks aren't in the agent — they're in the tool server. You can swap the agent, change the LLM, or build a completely different product on top, and the guard remains.
+
+---
+
 ## Stack
 
 | Component | Technology |
