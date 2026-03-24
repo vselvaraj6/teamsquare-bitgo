@@ -137,6 +137,8 @@ export function formatToolCall(name: string, input: Record<string, unknown>): st
   switch (name) {
     case "get_wallet_balance":
       return chalk.cyan("🔧 Checking wallet balance...");
+    case "get_recent_transactions":
+      return chalk.cyan("🔧 Recalling recent transactions...");
     case "check_address_risk":
       return chalk.cyan(`🔧 Checking address risk: ${chalk.bold(input.address as string)}`);
     case "execute_transaction":

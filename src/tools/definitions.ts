@@ -32,6 +32,26 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "get_recent_transactions",
+      description:
+        "Fetch the 10 most recent transactions (transfers) for this wallet. " +
+        "Use this to find addresses you have previously interacted with, " +
+        "or to verify the status of a recent payment.",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: {
+            type: "number",
+            description: "Number of transactions to fetch (default 10)",
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "check_address_risk",
       description:
         "Check if a crypto address is safe to send to. " +

@@ -30,15 +30,41 @@ export interface WalletInfo {
   id: string;
   coin: string;
   label: string;
+  // Numeric fields (BTC-family coins)
   balance: number;
   confirmedBalance: number;
   spendableBalance: number;
+  // String fields (SOL and other coins return these instead)
+  balanceString?: string;
+  confirmedBalanceString?: string;
+  spendableBalanceString?: string;
 }
 
 export interface SendCoinsResult {
   txid: string;
   status: string;
   transfer?: unknown;
+}
+
+export interface TransferInfo {
+  id: string;
+  txid: string;
+  coin: string;
+  wallet: string;
+  to: string;
+  from?: string;
+  amount: number;
+  value: number;
+  usd?: number;
+  state: string;
+  confirmedTime?: string;
+  comment?: string;
+  label?: string;
+}
+
+export interface TransfersResponse {
+  transfers: TransferInfo[];
+  count: number;
 }
 
 export interface SendCoinsParams {
@@ -90,6 +116,15 @@ export async function verifyAuth(): Promise<boolean> {
  */
 export async function getWallet(): Promise<WalletInfo> {
   const data = await bitgoFetch(`/api/v2/${coin}/wallet/${walletId}`) as WalletInfo;
+  return data;
+}
+
+/**
+ * Fetches the recent transaction history (transfers) for the configured wallet.
+ * Returns a list of incoming and outgoing transfers.
+ */
+export async function getTransfers(limit: number = 10): Promise<TransfersResponse> {
+  const data = await bitgoFetch(`/api/v2/${coin}/wallet/${walletId}/transfer?limit=${limit}`) as TransfersResponse;
   return data;
 }
 
