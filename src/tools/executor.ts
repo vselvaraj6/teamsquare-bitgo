@@ -14,7 +14,7 @@
  */
 
 import chalk from "chalk";
-import { getWallet, getTransfers, sendCoins } from "../bitgo.js";
+import { getWallet, getTransfers, sendCoins, getWalletAddresses } from "../bitgo.js";
 import { config } from "../config.js";
 import { checkAddressOnChainAbuse } from "../riskApi.js";
 
@@ -198,6 +198,20 @@ export async function toolExecuteTransaction(
 
   if (amount_satoshis <= 0) {
     return { success: false, blocked: true, reason: "Amount must be greater than zero." };
+  }
+
+  // Check for self-transfer — sending to your own wallet address
+  try {
+    const ownAddresses = await getWalletAddresses();
+    if (ownAddresses.some((a) => a.toLowerCase() === to.toLowerCase())) {
+      return {
+        success: false,
+        blocked: true,
+        reason: "Transaction blocked: the destination address belongs to this wallet. Cannot send funds to yourself.",
+      };
+    }
+  } catch {
+    // Fail open — if address list can't be fetched, don't block
   }
 
   // Verify sufficient balance

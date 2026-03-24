@@ -136,6 +136,17 @@ export async function getWallet(): Promise<WalletInfo> {
 }
 
 /**
+ * Fetches the list of on-chain addresses belonging to this wallet.
+ * Used to detect self-transfers (sending to your own wallet address).
+ */
+export async function getWalletAddresses(): Promise<string[]> {
+  const data = await bitgoFetch(`/api/v2/${coin}/wallet/${walletId}/addresses?limit=50`) as {
+    addresses: Array<{ address: string }>;
+  };
+  return (data.addresses ?? []).map((a) => a.address);
+}
+
+/**
  * Fetches the recent transaction history (transfers) for the configured wallet.
  * Returns a list of incoming and outgoing transfers.
  */
